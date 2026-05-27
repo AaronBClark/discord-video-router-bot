@@ -30,13 +30,28 @@ GEMINI_MODEL=gemini-2.5-flash-lite
 DATABASE_PATH=
 PORT=3000
 CHANNEL_MAP_JSON=[]
+DEBUG_VIDEO_ROUTER=false
 ```
 
-`CHANNEL_MAP_JSON` must be a one-line JSON array, not an object. Example:
+`CHANNEL_MAP_JSON` should be kept on one line for `.env` parsing. Preferred array form:
 
 ```env
 CHANNEL_MAP_JSON=[{"key":"ai","channelId":"123","description":"AI tools, models, agents, automation"},{"key":"uncategorized","channelId":"456","description":"Fallback when no category clearly fits"}]
 ```
+
+Shortcut object form also works:
+
+```env
+CHANNEL_MAP_JSON={"ai":"123","uncategorized":"456"}
+```
+
+While testing message detection, enable checkpoint logs:
+
+```env
+DEBUG_VIDEO_ROUTER=true
+```
+
+Then restart the bot. You will see whether each message was ignored because it was from a bot, outside `SOURCE_CHANNEL_IDS`, or had no YouTube link.
 
 ## Useful scripts
 

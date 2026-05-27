@@ -1,7 +1,7 @@
 import type { Client, TextChannel } from 'discord.js';
 import { ChannelType } from 'discord.js';
 import type { Env } from '../config/env.js';
-import { getChannelRoutes } from '../config/channels.js';
+import { describeChannelRoutes, getChannelRoutes, getRouteConfigErrors } from '../config/channels.js';
 import { analyzeVideoTranscript } from '../ai/summarize-video.js';
 import { getCachedAnalysis, saveAnalysis } from '../db/analysis-cache.js';
 import { getJob, setApprovalMessage, updateJobStatus } from '../db/jobs.js';
@@ -24,6 +24,7 @@ export async function processVideoJob(
     const job = getJob(jobId);
     if (!job) throw new Error(`Job not found: ${jobId}`);
 
+    logger.info(`Job ${jobId} started for ${input.videoId}.`);
     updateJobStatus(jobId, 'fetching_transcript');
 
     const transcript = await resolveTranscript(input.videoId, input.url);
@@ -34,20 +35,30 @@ export async function processVideoJob(
       return;
     }
 
+    logger.info(`Job ${jobId} transcript resolved from ${transcript.source} (${transcript.plainText.length} chars).`);
     updateJobStatus(jobId, 'summarizing');
 
     const routes = getChannelRoutes(env);
+    const routeErrors = getRouteConfigErrors(routes);
+    if (routeErrors.length > 0) {
+      logger.warn(`Route config warnings for job ${jobId}`, { routeErrors, routes: describeChannelRoutes(routes) });
+    }
+
     const cached = getCachedAnalysis(job.video_id, env.geminiModel);
+    if (cached) logger.info(`Job ${jobId} using cached Gemini analysis.`);
+
     const analysis = cached ?? (await analyzeVideoTranscript(env, routes, transcript.plainText));
 
     if (!cached) {
       saveAnalysis(job.video_id, env.geminiModel, analysis);
     }
 
+    logger.info(`Job ${jobId} analysis recommends "${analysis.recommended_channel_key}" at ${Math.round(analysis.confidence * 100)}% confidence.`);
+
     const approvalChannel = await client.channels.fetch(env.approvalChannelId);
 
     if (!approvalChannel || approvalChannel.type !== ChannelType.GuildText) {
-      throw new Error('APPROVAL_CHANNEL_ID does not point to a guild text channel.');
+      throw new Error(`APPROVAL_CHANNEL_ID (${env.approvalChannelId}) does not point to a guild text channel the bot can access.`);
     }
 
     const approvalMessage = await (approvalChannel as TextChannel).send({

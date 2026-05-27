@@ -10,17 +10,28 @@ import {
   type TextChannel,
 } from 'discord.js';
 import type { Env } from '../config/env.js';
-import { findChannelRoute, getChannelRoutes } from '../config/channels.js';
+import { describeChannelRoutes, findChannelRoute, getChannelRoutes } from '../config/channels.js';
 import type { VideoAnalysis } from '../ai/schemas.js';
 import { getJob, markPosted, updateJobStatus } from '../db/jobs.js';
 import { getDb } from '../db/db.js';
+import { parseYouTubeUrl } from '../links/youtube.js';
 import { logger } from '../utils/logger.js';
 
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function getYouTubeThumbnailUrl(videoUrl: string): string | null {
+  const parsed = parseYouTubeUrl(videoUrl);
+  return parsed ? `https://i.ytimg.com/vi/${parsed.videoId}/hqdefault.jpg` : null;
+}
+
 export function buildApprovalEmbed(jobId: number, videoUrl: string, analysis: VideoAnalysis): EmbedBuilder {
-  return new EmbedBuilder()
-    .setTitle(analysis.title_guess || 'Video ready for review')
+  const embed = new EmbedBuilder()
+    .setTitle(truncate(analysis.title_guess || 'Video ready for review', 256))
     .setURL(videoUrl)
-    .setDescription(analysis.short_summary)
+    .setDescription(truncate(analysis.short_summary, 4096))
     .addFields(
       {
         name: 'Recommended channel',
@@ -29,21 +40,26 @@ export function buildApprovalEmbed(jobId: number, videoUrl: string, analysis: Vi
       },
       {
         name: 'Topics',
-        value: analysis.topics.length ? analysis.topics.join(', ') : 'None',
+        value: analysis.topics.length ? truncate(analysis.topics.join(', '), 1024) : 'None',
         inline: true,
       },
       {
         name: 'Reason',
-        value: analysis.reason || 'No reason provided.',
+        value: truncate(analysis.reason || 'No reason provided.', 1024),
       },
       {
         name: 'Key points',
         value: analysis.key_points.length
-          ? analysis.key_points.map((point) => `• ${point}`).join('\n').slice(0, 1000)
+          ? truncate(analysis.key_points.map((point) => `• ${point}`).join('\n'), 1024)
           : 'None',
       },
     )
     .setFooter({ text: `Job ${jobId} • Transcript-based summary` });
+
+  const thumbnail = getYouTubeThumbnailUrl(videoUrl);
+  if (thumbnail) embed.setThumbnail(thumbnail);
+
+  return embed;
 }
 
 export function buildApprovalButtons(jobId: number): ActionRowBuilder<ButtonBuilder> {
@@ -114,37 +130,63 @@ async function approveJob(env: Env, client: Client, interaction: ButtonInteracti
   const route = findChannelRoute(routes, analysis.recommended_channel_key);
 
   if (!route?.channelId) {
+    logger.warn(`Approval failed because no destination route was available for job ${jobId}.`, {
+      requestedKey: analysis.recommended_channel_key,
+      routes: describeChannelRoutes(routes),
+    });
+
     await interaction.reply({
-      content: `No destination channel is configured for key "${analysis.recommended_channel_key}".`,
+      content: [
+        `No destination channel is configured for key "${analysis.recommended_channel_key}".`,
+        '',
+        'Loaded routes:',
+        describeChannelRoutes(routes),
+        '',
+        'Run `npm run check:config`, fix `CHANNEL_MAP_JSON`, then restart the bot.',
+      ].join('\n'),
       ephemeral: true,
     });
     return;
   }
 
-  const destination = await client.channels.fetch(route.channelId);
+  let destination;
+  try {
+    destination = await client.channels.fetch(route.channelId);
+  } catch (error) {
+    logger.error(`Could not fetch destination channel ${route.channelId} for job ${jobId}.`, error);
+    await interaction.reply({
+      content: `Could not fetch destination channel <#${route.channelId}> for key "${route.key}". Check bot permissions and the channel ID.`,
+      ephemeral: true,
+    });
+    return;
+  }
 
   if (!destination || destination.type !== ChannelType.GuildText) {
     await interaction.reply({
-      content: `Destination channel for "${route.key}" is not a text channel or could not be fetched.`,
+      content: `Destination channel for "${route.key}" is not a normal text channel or could not be fetched: <#${route.channelId}>.`,
       ephemeral: true,
     });
     return;
   }
 
   const embed = new EmbedBuilder()
-    .setTitle(analysis.title_guess || 'Video summary')
+    .setTitle(truncate(analysis.title_guess || 'Video summary', 256))
     .setURL(row.original_url)
-    .setDescription(analysis.detailed_summary)
+    .setDescription(truncate(analysis.short_summary || analysis.detailed_summary, 4096))
     .addFields(
       {
         name: 'Key points',
         value: analysis.key_points.length
-          ? analysis.key_points.map((point) => `• ${point}`).join('\n').slice(0, 1000)
+          ? truncate(analysis.key_points.map((point) => `• ${point}`).join('\n'), 1024)
           : 'None',
       },
       {
+        name: 'Detailed summary',
+        value: truncate(analysis.detailed_summary || 'None', 1024),
+      },
+      {
         name: 'Topics',
-        value: analysis.topics.length ? analysis.topics.join(', ') : 'None',
+        value: analysis.topics.length ? truncate(analysis.topics.join(', '), 1024) : 'None',
       },
       {
         name: 'Source',
@@ -152,6 +194,9 @@ async function approveJob(env: Env, client: Client, interaction: ButtonInteracti
       },
     )
     .setFooter({ text: 'Transcript-based summary' });
+
+  const thumbnail = getYouTubeThumbnailUrl(row.original_url);
+  if (thumbnail) embed.setThumbnail(thumbnail);
 
   const posted = await (destination as TextChannel).send({ embeds: [embed] });
   markPosted(jobId, route.channelId, posted.id);

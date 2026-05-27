@@ -10,6 +10,7 @@ export type Env = {
   databasePath: string;
   port: number;
   channelMapJson: string | null;
+  debugVideoRouter: boolean;
 };
 
 function requireEnv(name: string): string {
@@ -32,6 +33,11 @@ function resolveDatabasePath(): string {
   if (railwayVolume) return `${railwayVolume}/video-router.sqlite`;
 
   return resolve(process.cwd(), 'data/video-router.sqlite');
+}
+
+function optionalBooleanEnv(name: string): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
 }
 
 function resolvePort(): number {
@@ -62,5 +68,6 @@ export function getEnv(): Env {
     databasePath,
     port: resolvePort(),
     channelMapJson: optionalEnv('CHANNEL_MAP_JSON'),
+    debugVideoRouter: optionalBooleanEnv('DEBUG_VIDEO_ROUTER'),
   };
 }

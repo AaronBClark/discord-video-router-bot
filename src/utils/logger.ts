@@ -15,6 +15,9 @@ function serialize(payload: LogPayload): string {
 }
 
 export const logger = {
+  debug(message: string, payload?: LogPayload) {
+    console.log(`[debug] ${message}${payload === undefined ? '' : ` ${serialize(payload)}`}`);
+  },
   info(message: string, payload?: LogPayload) {
     console.log(`[info] ${message}${payload === undefined ? '' : ` ${serialize(payload)}`}`);
   },
