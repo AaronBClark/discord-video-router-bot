@@ -14,13 +14,44 @@ const fallbackRoutes: ChannelRoute[] = [
   },
 ];
 
+function isChannelRoute(value: unknown): value is ChannelRoute {
+  if (!value || typeof value !== 'object') return false;
+
+  const route = value as Partial<ChannelRoute>;
+
+  return (
+    typeof route.key === 'string' &&
+    route.key.trim().length > 0 &&
+    typeof route.channelId === 'string' &&
+    route.channelId.trim().length > 0 &&
+    typeof route.description === 'string' &&
+    route.description.trim().length > 0
+  );
+}
+
 export function getChannelRoutes(env: Env): ChannelRoute[] {
   if (!env.channelMapJson) return fallbackRoutes;
 
-  const parsed = JSON.parse(env.channelMapJson) as ChannelRoute[];
-  const clean = parsed.filter((route) => route.key && route.channelId && route.description);
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(env.channelMapJson);
+  } catch {
+    return fallbackRoutes;
+  }
+
+  if (!Array.isArray(parsed)) return fallbackRoutes;
+
+  const clean = parsed
+    .filter(isChannelRoute)
+    .map((route) => ({
+      key: route.key.trim(),
+      channelId: route.channelId.trim(),
+      description: route.description.trim(),
+    }));
 
   if (clean.length === 0) return fallbackRoutes;
+
   if (!clean.some((route) => route.key === 'uncategorized')) {
     clean.push({
       key: 'uncategorized',

@@ -20,14 +20,26 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function optionalEnv(name: string): string | null {
+  return process.env[name]?.trim() || null;
+}
+
 function resolveDatabasePath(): string {
-  const explicit = process.env.DATABASE_PATH?.trim();
+  const explicit = optionalEnv('DATABASE_PATH');
   if (explicit) return explicit;
 
-  const railwayVolume = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim();
+  const railwayVolume = optionalEnv('RAILWAY_VOLUME_MOUNT_PATH');
   if (railwayVolume) return `${railwayVolume}/video-router.sqlite`;
 
   return resolve(process.cwd(), 'data/video-router.sqlite');
+}
+
+function resolvePort(): number {
+  const value = Number(process.env.PORT ?? 3000);
+  if (!Number.isInteger(value) || value <= 0 || value > 65535) {
+    throw new Error(`Invalid PORT: ${process.env.PORT}`);
+  }
+  return value;
 }
 
 export function getEnv(): Env {
@@ -46,9 +58,9 @@ export function getEnv(): Env {
     approvalChannelId: requireEnv('APPROVAL_CHANNEL_ID'),
     sourceChannelIds,
     geminiApiKey: requireEnv('GEMINI_API_KEY'),
-    geminiModel: process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash-lite',
+    geminiModel: optionalEnv('GEMINI_MODEL') ?? 'gemini-2.5-flash-lite',
     databasePath,
-    port: Number(process.env.PORT ?? 3000),
-    channelMapJson: process.env.CHANNEL_MAP_JSON?.trim() || null,
+    port: resolvePort(),
+    channelMapJson: optionalEnv('CHANNEL_MAP_JSON'),
   };
 }
